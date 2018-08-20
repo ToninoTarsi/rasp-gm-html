@@ -1,5 +1,4 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
-   "http://www.w3.org/TR/html4/loose.dtd">
+<!DOCTYPE html>
 
 <!--
 	RASPtableGM
@@ -10,12 +9,17 @@
 	* Shift-Scroll Wheel adjusts Opacity of Overlay
 	* Normal Google Maps Controls (Dbl-L-Click, Drag, Scroll Wheel)
 	* Single L-Click for Forwards within a day
-	* R-Click or Long-Left-Click gives InfoWindow @ Location with Value for time or whole day, SkewT or X-section (for wave plots)
+	* R-Click or Long-Left-Click (3 sec+) gives InfoWindow @ Location with Value for time or whole day, SkewT or X-section (for wave plots)
 	* Loads image for next time on Day/Param selection
 	* Soundings indicated by Clickable Markers
 	* Archives 
 	* Auto select times for STD / DST
 	* NB: M$ Windows users must ensure TimeZone and "Adjust clock for Daylight Saving" is set in Control Panel->Date & Time
+
+	* Airspace files from http://3dairspace.org.uk/google_earth/downloads/sua/united_kingdom.kmz
+	  Other locations also available from http://3dairspace.org.uk
+	  You can use google-earth to split out airspace classes
+	  
 -->
 
 <html>
@@ -28,7 +32,7 @@
 
 	<script type= "text/javascript">
 		// CHANGE THESE FOR YOUR SITE
-		var Server = "http://rasp.inn.leedsmet.ac.uk/";
+		var Server = "http://rasp-uk.uk/";
 		var SAVE_DAYS = 7;	// Number of days of saved wrfout files (inc Today!)
 					// MUST aggree with LSAVE_DAYS in rasp.run.parameters.REGIONXYZ
 
@@ -51,7 +55,8 @@
 	<!-- BUT *DON'T* CHANGE THESE UNLESS YOU KNOW WHAT YOU'RE DOING :-) -->
 
 	<!-- NOTE: Order is important here! -->
-	<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?libraries=geometry"></script>
+	<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCQ4iZx2jVI_0zSJBB3wF8wxRst1KeJ5T0&libraries=geometry"></script>
+	<!-- script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBgDitw3wnMM1pHtx2TWK0fEP5o8WnwqpY&libraries=geometry"></script -->
 	<script type="text/javascript" src="paramList.js"></script>
 	<script type="text/javascript" src="corners.js"></script>
 	<script type="text/javascript" src="soundings.js"></script>
@@ -209,12 +214,11 @@
 							</td>
 						</tr>	 <!-- End Row 8 -->
 						<tr>     <!-- Row 9 -->
-							<td title="Specify the Task" colspan=2 >
+							<td colspan=2 title="Specify the Task" >
 								<div align = center>
-									<button onclick="getTask();"> Specify Task </button>
+									<button align = center onclick="addBGAmarkers();"> Specify Task </button>
 								</div>
 							</td>
-						</tr>   <!-- End Row 9 -->
 						<tr>    <!-- Row 10 -->
 							<td colspan=2>
 								<div align = center>
@@ -229,7 +233,14 @@
 								</div>
 							</td>
 						</tr>   <!-- End Row 11 -->
-						<tr>	<!-- Row 12 -->
+						<tr>    <!-- Row 12 -->
+							<td colspan = 2>
+								<div align = center>
+									<button align=right onclick="rmBGAmarkers();"> Remove BGA Markers </button>
+								</div>
+							</td>
+						</tr>   <!-- End Row 12 -->
+						<tr>	<!-- Row 13 -->
 							<td colspan=2 align=center>
 								<form id="airspace" action="">
 									<b>AirSpace</b>
@@ -241,21 +252,21 @@
 									<input onClick="doAirspace();" name="air" type="checkbox" value="X">X
 								</form>
 							</td>
-						</tr>	<!-- End Row 12 -->
-						<tr>	<!-- Row 13 -->
-							<td title="User Guide" colspan=2 >
-								<div align = center>
-									<button onClick="return popup('http://rasp.inn.leedsmet.ac.uk/DOCS/RASPtableGMintro.html', 'User Guide', 550, 270)">User Guide</button>
-								</div>
-							</td>
 						</tr>	<!-- End Row 13 -->
 						<tr>	<!-- Row 14 -->
+							<td title="User Guide" colspan=2 >
+								<div align = center>
+									<button onClick="return popup(Server+'DOCS/RASPtableGMintro.html', 'User Guide', 550, 270)">User Guide</button>
+								</div>
+							</td>
+						</tr>	<!-- End Row 14 -->
+						<tr>	<!-- Row 15 -->
 							<td title="Legal Stuff" colspan=2 >
 								<div align = center>
 									<button onClick="return popup('DisclaimerNew.html', 'Disclaimer', 550, 270)">Disclaimer</button>
 								</div>
 							</td>
-						</tr>	<!-- End Row 14 -->
+						</tr>	<!-- End Row 15 -->
 					</table>
 				</div> <!-- End selectors div -->
 			</td>	<!-- End Selection Boxes -->
@@ -270,7 +281,7 @@
 								</div>
 								</div>
 							</td>
-							<td/> <!-- Dummy Cell -->
+							<td></td> <!-- Dummy Cell -->
 						</tr>
 						<tr>
 							<td>
@@ -288,7 +299,7 @@
 									<img id="theScale" alt="Bottom Scale" src="">
 								</div>
 							</td>
-							<td/> <!-- Dummy Cell -->
+							<td></td> <!-- Dummy Cell -->
 						</tr>
 					</table>
 				</div>

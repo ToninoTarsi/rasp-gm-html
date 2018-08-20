@@ -33,7 +33,7 @@ var paramList = 	[
 
 /* 7 */ ["",		 "dbl",						"BL Depth", "Depth of the layer mixed by thermals or (vertical) wind shear.  This parameter can be useful in determining which flight direction allows better thermalling conditions when average surface elevations vary greatly in differing directions.  (But the same cautions mentioned under Height of BL Top also apply.)  It is also an important determinant of thermals strength (as is the Surface Heating)"],
 
-/* 8 */ ["",		 "hglider",				"Thermalling Height", "This is the minimum of the height at which updraft strength falls below 225 fpm, the Cu Cloudbase and the OverDevelopment Cloudbase. It might thus indicate the maximum soaring height which is achievable in thermals, clear of cloud. Note that the plot of 'Height of Critical Updraft Strength (175fpm)' is calculated for 175 fpm, not 225 fpm as is used here"],
+/* 8 */ ["",		 "hglider",				"Thermalling Height", "This is the minimum of the height at which updraft strength falls below 175 fpm, the Cu Cloudbase and the OverDevelopment Cloudbase. It might thus indicate the maximum soaring height which is achievable in thermals, clear of cloud."],
 
 /* 9 */ ["",		 "bltopvariab",		"Thermal Height Uncertainty", "This parameter estimates the uncertainty (variability) of the BL Top height prediction which can result from meteorological variations.  Specifically, it gives the expected increase of a BL Top height based on a Thermal Index (TI) = 0 criteria should the actual surface temperature be 4 °F warmer than forecast.  Larger values indicate greater uncertainty/variability and thus better thermalling over local 'hot spots' or small-scale topography not resolved by the model.  But larger values also indicate greater sensitivity to error in the predicted surface temperature, so actual conditions have a greater likelihood of differing from those predicted.  Small values often result from the presence of a stable (inversion) layer capping and limiting thermal growth.  This parameter is most easily utilized through relative values, i.e. by first determining a 'typical' value for a location and subsequently noting whether predictions for a given day are for more/less uncertainty than is typical."],
 
@@ -132,7 +132,7 @@ var paramList = 	[
 
 /* 56 */ ["",		 "sounding13", 		"#13: Carrickmore-NI", "Predicted SkewT*LogP Sounding Chart for Carrickmore-NI"],
 
-/* 57 */ ["",		 "sounding14", 		"#14: Castor Bay-NI", "Predicted SkewT*LogP Sounding Chart for Castor Bay-NI"],
+/* 57 */ ["",		 "sounding14", 		"#14: Glenfarg Reservoir E", "Predicted SkewT*LogP Sounding Chart for Glenfarg Reservoir E"],
 
 /* 58 */ ["",		 "sounding15", 		"#15: Talgarth", "Predicted SkewT*LogP Sounding Chart for Talgarth"],
 

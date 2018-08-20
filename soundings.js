@@ -96,9 +96,9 @@ soundings.NAM[13]    = "Carrickmore";
 soundings.LOC[13]    = new google.maps.LatLng(soundings.LAT[13], soundings.LON[13]);
 
 /* Sounding 14 */
-soundings.LAT[14]    = 54.5;
-soundings.LON[14]    = -6.33;
-soundings.NAM[14]    = "CastorBay NI";
+soundings.LAT[14]    = 56.2814;
+soundings.LON[14]    = -3.4396;
+soundings.NAM[14]    = "Glenfarg Reservour E";
 soundings.LOC[14]    = new google.maps.LatLng(soundings.LAT[14], soundings.LON[14]);
 
 /* Sounding 15 */

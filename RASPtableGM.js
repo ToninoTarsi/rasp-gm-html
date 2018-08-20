@@ -2,9 +2,10 @@
  *	RASPtableGM.js  *
  **********************/
 
-/* 2013/06/27
- * Fix click throuh day for IE on Soundings
- * Line 1227
+/* 7 Mar 2018
+ *
+ * Update for GM3.32++ & "new renderer"
+ *
  */
 
 /* 
@@ -31,6 +32,7 @@ var overlay = null;
 var markerArray = [];
 var infoArray = [];
 var taskMarkerArray = [];
+var BGAMarkerArray = [];
 var airspaceArray = [];
 var ASstring;
 var Event;
@@ -63,7 +65,7 @@ var wasSounding = false ;
 function initIt()
 {
 	document.body.style.overflow = "hidden"; // Disable Scrolling
-	window.onresize = function(){setSize();}
+	window.onresize = function(){setSize(); doChange(); }
 
 	oldDayIndex = document.getElementById("Day").options.selectedIndex;
 	oldParam = document.getElementById("Param").options.value;
@@ -260,26 +262,27 @@ function initIt()
 		}
 	}
 
-
 	map = newMap();
-
-	new LongClick(map, 3000);	// longclick
-
-	// map.fitBounds(Bnds);	// This seems to zoom out rather too much!
 
 	setSize();
 
 	// Install handlers for the map
-	google.maps.event.addListener(map, 'rightclick',     function(event) { newclick(event);             });	// R-Click and longpress
-	google.maps.event.addListener(map, 'longpress',      function(event) { newclick(event);             });	// do the same thing
-	google.maps.event.addListener(map, 'click',          function(event) { oneclick(event);             });
-	google.maps.event.addListener(map, 'dragend',        function(event) { constrainMap(event);         });
-	google.maps.event.addListener(map, 'zoom_changed',   function(event) { constrainMap(event);         });
+	google.maps.event.addListener(map, 'rightclick', function(event) { R_click(event);     });	
+	google.maps.event.addListener(map, 'longpress',  function(event) { R_click(event);     });	// longpress is R_click for touch screens
+	google.maps.event.addListener(map, 'click',      function(event) { L_click(event);     });
+	google.maps.event.addListener(map, 'idle',       function(event) { constrainMap(event);});
+
+	createOpacityControl(map); 
+
+	new LongClick(map, 3000);	// nstatiate longclick
+
+	addSndMarkers();
 
 	// Install airspaces
 	var airspaceOpts = {
-		// map:  map,	// Don't specify map yet - done when AS is switched on
-		preserveViewport: true
+		map:		  null,	// Don't specify map yet - done when AS is switched on
+		preserveViewport: true,
+		zIndex:		  1000
 	};
 
 	url = location.href;
@@ -291,7 +294,8 @@ function initIt()
 		airspaceArray[i] = new google.maps.KmlLayer(ASstring, airspaceOpts);
 	}
 
-	doChange(null);
+	// Wait till tiles loaded, then doChange()
+	google.maps.event.addListenerOnce(map, "tilesloaded", function() { doChange(null); } );
 }
 
 /****************************************
@@ -313,7 +317,9 @@ function mkdat(T)
 }
 
 
-// Called on end of drag or zoom change
+/* Called when idle - end of drag or zoom change
+ * Centre map if outside ViewPort
+ */
 function constrainMap(E)
 {
 	var VPbounds, URL;
@@ -321,15 +327,6 @@ function constrainMap(E)
 	while(!(VPbounds = map.getBounds()))
 		; // Hmmm! Busy wait?
 	
-	// Register new zoom & centre values in Page URL
-	zoom = map.getZoom();
-	centre = map.getCenter();
-
-	URL = document.getElementById("Url").innerHTML;
-	URL = URL.replace(/centre=-*\d+\.\d+,-*\d+\.\d+/, "centre=" + centre.toUrlValue() );
-	URL = URL.replace(/zoom=\d+/, "zoom=" + zoom);
-	document.getElementById("Url").innerHTML = URL;
-
 	// Check that overlay corners are within ViewPort
         if( !VPbounds.intersects(corners.Bounds[resolution])){
 		if(confirm("Map Outside ViewPort\nReCentre?")){
@@ -337,6 +334,8 @@ function constrainMap(E)
 			centre = map.getCenter();
 		}
 	}
+
+	doUrl();
 }
 
 
@@ -349,7 +348,6 @@ function newMap()
 		scrollwheel:	    false,
 		draggableCursor:    "crosshair",
 		streetViewControl:  false,
-		// overviewMapControl:  true,
 		minZoom:            6,
 		maxZoom:            12
 	};
@@ -359,97 +357,8 @@ function newMap()
 }
 	
 
-var TParray = ['LAS','NWK','SUT', 'TAL', 'LAS']; // Any old default Task!
-var taskCoords = [];
-var taskList = [];
-var taskLine = null;
+/**************** SOUNDINGS Markers *************************************************/
 
-// Add or change a Task
-function addTask()
-{
-	var path;
-		
-	// Remove the Task Lines, if present
-	if(taskLine){
-		path = taskLine.getPath();
-		for(i = 0; i < path.length; i++){
-			path.removeAt(path.getAt(i));
-		}
-		taskList.length = 0;
-		taskLine.setMap(null);
-		taskLine = null;
-	
-		// Remove the Task Markers
-		if(taskMarkerArray){
-			for(i = 0; i < taskMarkerArray.length; i++){
-				taskMarkerArray[i].setMap(null);
-				taskMarkerArray[i] = null;
-			}
-			taskMarkerArray.length = 0;
-		}
-	}
-
-	// Install the new Task
-	if(TParray.length == 0){	//Nothing to do
-		document.getElementById("trkavgpopup").disabled = true;
-		return;
-	}
-
-	for(var i = 0; i < TParray.length; i++){
-		var latlo = turnPts[TParray[i]].latlon;
-		if(latlo){
-			lat = latlo.split(',')[0];
-			lon = latlo.split(',')[1];
-			taskList.push( new google.maps.LatLng(lat, lon));
-		}
-	}
-	drawTask();
-
-	// Enable the TrackAvg button
-	document.getElementById("trkavgpopup").disabled = false;
-}
-
-
-function drawTask()
-{
-	if(taskList && taskList.length > 0 && taskLine){	// Remove the old Task Lines
-		taskLine.setMap(null);
-		taskLine = null;
-	}
-
-	var taskLineOpts = {
-	                     map:   map,
-	                     path:  taskList,
-	                     zindex:       1000000,
-	                     strokeWeight:	3,
-	                     strokeColor:  "#cc00cc"
-	                     };		
-
-	taskLine = new google.maps.Polyline(taskLineOpts);
-	taskLine.setMap(map);
-
-	// NOT a good idea! google.maps.event.addListener(taskLine, 'click', function(){ TrackAvg(); });
-
-	var N = -90, S = 90, E = -180, W = 180;
-
-	if(taskList.length > 0){
-		for(i = 0; i < taskList.length; i++){
-			if( taskList[i].lat() > N ) N = taskList[i].lat();
-			if( taskList[i].lat() < S ) S = taskList[i].lat();
-			if( taskList[i].lng() > E ) E = taskList[i].lng();
-			if( taskList[i].lng() < W ) W = taskList[i].lng();
-		}
-		var taskBounds = new google.maps.LatLngBounds(new google.maps.LatLng(S, W), new google.maps.LatLng(N, E));
-
-		map.fitBounds(taskBounds);
-
-		addTaskMarkers();
-	}
-}
-
-
-
-/* Install Soundings Markers */
 function addSndMarkers()
 {
 	// Install the markers - but only if needed
@@ -499,19 +408,200 @@ function addSoundingLink(marker, n)
 							 + '/sounding' + n + '.curr.'
 							 + document.getElementById("Time").value 
 							 + 'lst.d2.png" height=800 width=800>' ;
-							 // + 'lst.d2.png" height=400 width=400>' ;
 			}
 			else {
 				sndURL += 'FCST/sounding' + n + '.curr.'
 				       + document.getElementById("Time").value 
 				       + 'lst.d2.png" height=800 width=800>' ;
-				       // + 'lst.d2.png" height=400 width=400>' ;
 			}
 			var infowindow = new google.maps.InfoWindow( { content: sndURL });
 			infoArray.push(infowindow);
 			infowindow.open(map, marker);
 		}
 	);
+}
+/**************** End SOUNDINGS Markers *************************************************/
+
+
+/******************* Start TRACK AVERAGE Stuff ***************************/
+
+var task = [];
+var TParray = [];
+var taskList = [];
+
+var siz    = 24;
+var anchor = siz / 2;
+var S = new google.maps.Size(siz,siz);        // size
+var O = new google.maps.Point(0,0);           // origin
+var A = new google.maps.Point(anchor,anchor); // anchor
+var L = new google.maps.Size(siz,siz);        // scaledSize
+var tpRd = new google.maps.MarkerImage( "iconRed.png",     S, O, A, L);
+var tpGn = new google.maps.MarkerImage( "iconGreen.png",   S, O, A, L);
+var tpBl = new google.maps.MarkerImage( "iconBlue.png",    S, O, A, L);
+var tpCy = new google.maps.MarkerImage( "iconCyan.png",    S, O, A, L);
+var tpMg = new google.maps.MarkerImage( "iconMagenta.png", S, O, A, L);
+var tpYl = new google.maps.MarkerImage( "iconYellow.png",  S, O, A, L);
+var tpWt = new google.maps.MarkerImage( "iconWhite.png",   S, O, A, L);
+
+var BGAmarkerArray = [];
+
+/* Remove all BGA TP Markers */
+function rmBGAmarkers()
+{
+	for (m in BGAmarkerArray){
+		BGAmarkerArray[m].setMap(null);
+	}
+	clearTask();
+}
+
+/* Install All BGA Markers */
+function addBGAmarkers()
+{
+        for(p in turnPts ){
+		var lat = turnPts[p].latlon.split(',')[0];
+		var lon = turnPts[p].latlon.split(',')[1];
+		var pos = new google.maps.LatLng(lat, lon);
+		marker = new google.maps.Marker({
+			     position: pos,
+			     title:    turnPts[p].code + " - " + turnPts[p].name + " - " + turnPts[p].cat,
+			     map:      map
+			 });
+		BGAmarkerArray.push(marker);
+
+		var icon;
+		switch(turnPts[p].cat[0]){
+		case "A": icon = tpGn; break;
+		case "B": icon = tpCy; break;
+		case "C": icon = tpMg; break;
+		case "D": icon = tpBl; break;
+		}
+		marker.setIcon(icon);
+		marker.addListener('click', function() {
+			var tp = this.getTitle().slice(0,3);  // Trigraph
+			if(TParray[TParray.length - 1] == tp){
+				return;	// Avoid adjacent duplicates
+			}
+			TParray.push(tp);
+			if(isNewTP(this) || isStartTP(this)){
+				this.setIcon(tpWt);
+				task.push(this);
+				if(task.length > 0){ // Enable the TrackAvg button
+					document.getElementById("trkavgpopup").disabled = false;
+				}
+			}
+			else{
+				var icon;
+				switch(turnPts[tp].cat[0]){
+				case "A": icon = tpGn; break;
+				case "B": icon = tpYl; break;
+				case "C": icon = tpMg; break;
+				case "D": icon = tpRd; break;
+				}
+				this.setIcon(icon);
+				removeTP(this);
+			}
+			var distance = drawTask().toFixed(1);
+			var text = '<div><b>' + tp + ' ' + turnPts[tp].name + '</b></div><div>' +
+				turnPts[tp].exactPt + '</div><br>' + '<div>' + turnPts[tp].desc + '</div><br>' +
+				'<div><button type=button onclick="clearTask()">Clear Task</button></div><br><div><b>Task Distance: ' +
+				distance + ' km</b></div>';
+
+			var infoWindow = new google.maps.InfoWindow({
+			                 content:  text,
+			                 position: this.getPosition()
+			});
+			infoWindow.open(map);
+			setTimeout(function () { infoWindow.close(); }, 3000);
+		});
+	}
+}
+
+function addInfoWindow(marker)
+{
+	var tri = marker.getTitle().slice(0,3);
+        var text = '<div><b>' + tri + ' ' + turnPts[tri].name + '</b></div><div>' + turnPts[tri].exactPt + '</div><br>' + 
+	           '<div>' + turnPts[tri].desc + '</div><br>' +
+                   '<div><button type=button onclick="clearTask()">Clear Task</button></div><br><div><b>Task Distance: </b></div>';
+  
+        var infoWindow = new google.maps.InfoWindow({
+          content:  text,
+	  position: marker.getPosition()
+        });
+	return(infoWindow);
+}
+
+function clearTask()
+{
+	for (var i=0; i<task.length; i++) {
+		var tp = task[i].getTitle().slice(0,3);
+		var cat = turnPts[tp].cat[0];
+		var icon;
+		switch(cat){
+		case "A": icon = tpGn; break;
+		case "B": icon = tpYl; break;
+		case "C": icon = tpMg; break;
+		case "D": icon = tpRd; break;
+		}
+		task[i].setIcon(icon);
+	}
+	TParray = [];
+	task = [];
+	drawTask();
+}
+
+function removeTP(marker)
+{
+	for (var i=0; i<task.length; i++) {
+		if(task[i].getPosition().lng()==marker.getPosition().lng()
+		   && task[i].getPosition().lat()==marker.getPosition().lat()) {
+			task.splice(i,1);
+        	}
+	}
+}
+
+function isNewTP(marker)
+{
+	for(var i = 0; i < task.length; i++){
+		if(marker.getPosition().lat==task[i].getPosition().lat
+		   &&
+		   marker.getPosition().lon==task[i].getPosition().lon){
+			return(false);
+		}
+	}
+	return(true);
+}
+
+function isStartTP(marker)
+{
+	return marker.getPosition().lat==task[0].getPosition().lat && marker.getPosition().lon==task[0].getPosition().lon;
+}
+
+var flightPath;
+
+function drawTask()
+{
+	var legs = [];
+	var d;
+
+	if (flightPath!=null) {
+		flightPath.setMap(null);
+	}
+
+	for (var i=0; i<task.length; i++) {
+		legs.push(task[i].getPosition());
+	}
+	flightPath = new google.maps.Polyline({
+		path: legs,
+		geodesic: true,
+		strokeColor: '#FF0000',
+		strokeOpacity: 1.0,
+		strokeWeight: 2
+	});
+
+	flightPath.setMap(map);
+
+	d = google.maps.geometry.spherical.computeLength( legs ) / 1000;	// Convert to Km
+	return d;
 }
 
 /* Install Task Markers */
@@ -559,31 +649,52 @@ function addTaskMarkers()
 	}
 }
 
-function TPinfo()
-{
-	/*
-	 * PlaceHolder for now
-	 * Need to find a way to identify which TP was clicked
-	 */
-	var desc;
 
-	for(p = 0; p < TParray.length; p++){
-		for(j = 0; j < tpn.length; j++){
-			if(tpn[j] == TParray[p]){
-				desc = tpdesc[j];
-			}
-		}
-		infoOpts = {
-		            position: taskList[p],
-		            map:      map,
-		            content:  desc
-		};
-		var infowindow = new google.maps.InfoWindow( infoOpts );
-		infowindow.open(map);
-	}
+// Default Values for getGlider()
+var glider  = "DiscusA";
+var ballast = "1";
+var tsink   = "2.00kt";
+var tmult   = "1.0";
+
+function selGlider()
+{
+	return popup("glider.html", 'Select_Glider', 480, 300);
 }
 
-// Needed for Status Report!
+
+function TrackAvg()
+{
+	var str;
+	
+	// str = Server + "/cgi-bin/get_rasptrackavg.cgi?region=" + getRegion() + "&grid=d2&day=" ;
+	str = Server + "/perl/get_rasptrackavg.cgi?region=" + getRegion() + "&grid=d2&day=" ;
+
+	if(archiveMode){
+		str = str + document.getElementById("archiveYear").value + "-"
+                          + document.getElementById("archiveMonth").value + "-"
+                          + document.getElementById("archiveDay").value;
+	}
+	else{
+		str = str + "0";
+	}
+
+	// Can be turnpts or latlon pairs - See cgi src
+	str = str + "&time=" + document.getElementById("Time").value + "%2b&polar=" + glider + "&wgt=" + ballast + "&tsink=" + tsink + "&tmult=" + tmult + "&turnpts=";
+	if(TParray.length < 2){
+		return;
+	}
+	for(i  = 0; i < TParray.length; i++){
+		str = str + TParray[i] + ",";
+	}
+	str = str.replace(/,$/ , '');	// Zap last ','
+
+	// alert(str);
+	window.open(str, "Track_Average", "width=1024,height=700,resizable=yes,scrollbars=yes");
+}
+
+/******************* End TRACK AVERAGE Stuff ***************************/
+
+/******************** POPUP ********************************************/
 function popup(mylink, windowname, wid, ht)
 {
 	if (! window.focus)return true;
@@ -607,32 +718,10 @@ function getStatus()
 }
 
 
-/*
- * Need to distinguish Single vs Double Click
- *
- * doclick() is always called: Set timeout
- *
- * If dblclick() fires within timeout, reset timer (default actions follow)
- * Else oneclick() runs
- *
- */
-var	timeoutId;
-
-function doclick()
-{
-	timeoutId = setTimeout(oneclick, 500);
-}
-
-
-function dblclick()
-{
-	clearTimeout(timeoutId);
-}
-
 /********************************/
 /* CallBack for onclick (image) */
 /********************************/
-function oneclick(E)
+function L_click(E)
 {
 	// Catch a stupid selection
 	if (document.getElementById("Param").value === "nope1") {
@@ -659,7 +748,7 @@ function oneclick(E)
  *
  * Returns: "" if not implemented
  *          Parameter name, or
- *          Two Parameter names for Vector Parameters
+ *          2+ Parameter names for some Parameters
  ******************************************************/
 function checkParam()
 {
@@ -681,9 +770,6 @@ function checkParam()
 	badParams[14] = "sounding13";
 	badParams[15] = "sounding14";
 	badParams[16] = "sounding15";
-	// badParams[17] = "topo" ;
-	// badParams[18] = "zblclmask" ;
-	// badParams[19] = "zsfclclmask" ;
 
 	var param =document.getElementById("Param").value;
 	for(i = 0; i < badParams.length; i++) 
@@ -750,8 +836,6 @@ function doCallback(url, data, Event)
 	}
 	else { alert("Failed to send XML data"); }
 }
-
-var text;
 
 // Determine the Map Resolution
 function getResolution()
@@ -893,7 +977,6 @@ function setSize()
 		document.getElementById("Time").size  = 8;
 		document.getElementById("Day").size   = 8;
 	}
-	doChange(null);
 }
 
 
@@ -920,6 +1003,7 @@ function isArchive()
 }
 
 
+// Called only from html button
 function resetArchive()
 {
 	document.getElementById("archiveDay").options[0].selected = true;
@@ -1003,7 +1087,7 @@ function doChange(E)
 
 	/* Clear saved images
 	 * if changing to / from archiveMode,
-	 * or Param or Day changes
+	 * or if Param or Day changes
 	 */
 	if(      (oldParam    !== document.getElementById("Param").value)
 	      || (oldDayIndex !== document.getElementById("Day").selectedIndex)
@@ -1101,10 +1185,9 @@ function doUrl() // Set up URL link
 
 
 /************************************************/
-/* Load the Image, and the next one             */
+/* Load the Image                               */
 /* -1 => backwards; 0 => neither; 1 => forwards */
 /************************************************/
-
 function loadImage(dirn)
 {
 	var imgURL;
@@ -1135,7 +1218,7 @@ function loadImage(dirn)
 		imgURL =  Server + getBasedir() + "/FCST/" ;
 	}
 
-	// Load image(s) / overlays and next one(s)
+	// Load image(s) / overlays
 	for(x = tIdx, i = 0; i < 2; i++){
 		if(!Loaded[x]){
 			t = document.getElementById("Time").options[x].value;
@@ -1157,8 +1240,11 @@ function loadImage(dirn)
 				theTitles[x].src     = ximgURL + ".head.png";
 				theSideScales[x].src = ximgURL + ".side.png";
 				theScales[x].src     = ximgURL + ".foot.png";
-				Overlays[x]          = new RASPoverlay(corners.Bounds[resolution], ximgURL + ".body.png", map);
-				Overlays[x].setMap(map);
+				// Visible if overlay is current one
+				Overlays[x]          = new RASPoverlay(corners.Bounds[resolution],
+				                                       ximgURL + ".body.png",
+				                                       map,
+				                                       i == 0 ? "visible" : "hidden" );
 			}
 			Loaded[x] = true;
 		}
@@ -1177,35 +1263,17 @@ function loadImage(dirn)
 			imgData.replaceChild(imgFragment, imgData.firstChild);
 		}
 
-		if ( opacity_control == "N" ) {	
-			createOpacityControl(map); 
-			opacity_control = "Y";
+		for(x = 0; x < Overlays.length; x++){
+			if(Overlays[x]){
+				if(x == tIdx){ overlay = Overlays[x]; overlay.show(); }
+				else         { Overlays[x].hide();    }
+			}
 		}
-
 		document.getElementById("theTitle").src     = theTitles[tIdx].src;
 		document.getElementById("theScale").src     = theScales[tIdx].src;
 		document.getElementById("theSideScale").src = theSideScales[tIdx].src;
 
-		for(x = 0; x < Overlays.length; x++){
-			if(Overlays[x]){
-				if(x == tIdx){
-					overlay = Overlays[x];
-					// Big kludge to wait until overlay is loaded :-(
-					window.setTimeout( "overlay.setOpacity();", 0);
-				}
-				else {
-					Overlays[x].hide();
-				}
-			}
-		}
-
-		addSndMarkers();
-
-		// Handle Centre & Zoom - e.g. if specified in URL
-		google.maps.event.addListener(map, "tilesloaded", function() { overlay.setOpacity()} );
-		map.setCenter(centre);
-		// map.setZoom(zoom);
-
+                overlay.setOpacity();
 	}
 	else {	// Sounding
 		if(wasSounding == false){
@@ -1221,13 +1289,13 @@ function loadImage(dirn)
 		dunnit = imgData.firstChild.getAttribute("done");
 		if( !dunnit || (dunnit && dunnit.length == 0)){	// null OR a zero-length string if no attribute
 			if( typeof(attachEvent) != "undefined")
-				imgData.firstChild.attachEvent('onclick', function(event) {oneclick(event);});
+				imgData.firstChild.attachEvent('onclick', function(event) {L_click(event);});
 			else
-				imgData.firstChild.addEventListener('click', function(event) {oneclick(event);});
+				imgData.firstChild.addEventListener('click', function(event) {L_click(event);});
 			imgData.firstChild.setAttribute("done");
 		}
 	}
-	doUrl();	// set up the Page URL
+	doUrl();	// Set/update the Page URL
 }
 
 var imgFragment = null;
@@ -1248,15 +1316,13 @@ function doAirspace()
 }
 
 
-function newclick(E)
+function R_click(E)
 {
 	var tail;
 	var parameter;
 	var str;
 	var lat;
 	var lon;
-
-	clearTimeout(timeoutId);
 
 	if( !corners.Bounds[resolution].contains(E.latLng)){ // Outside forecast area!
 		return;
@@ -1300,7 +1366,8 @@ function newclick(E)
 			}
 
 			wrffile = getRegion();
-			blipSpotUrl = Server + "cgi-bin/get_rasp_xbl.cgi";
+			// blipSpotUrl = Server + "cgi-bin/get_rasp_xbl.cgi";
+			blipSpotUrl = Server + "cgi-bin/get_rasp_plot.cgi";
 			tail = "region=" + wrffile
 			                 + "&grid="   + "d2"
 			                 + "&day=" 
@@ -1313,6 +1380,7 @@ function newclick(E)
 			                 + "&lon="    + lon
 			                 + "&time="   + document.getElementById("Time").value
 			                 + "&param="  + document.getElementById("Param").value
+			                 + "&plot=xbl"
 			;
 			addInfo(E.latLng, "<pre>See PopUp Window<br>Stipple => Cloud<br>&Delta; indicates posn</pre>");
 			// alert("diff = " + diff + "\ntail = " + tail);
@@ -1335,7 +1403,8 @@ function newclick(E)
 			}
 
 			wrffile = getRegion();
-			blipSpotUrl = Server + "cgi-bin/get_rasp_skewt.cgi";
+			// blipSpotUrl = Server + "cgi-bin/get_rasp_skewt.cgi";
+			blipSpotUrl = Server + "cgi-bin/get_rasp_plot.cgi";
 			tail = "region=" + wrffile
 			                 + "&grid="   + "d2"
 			                 + "&day="
@@ -1347,13 +1416,15 @@ function newclick(E)
 			                 + "&lat="    + lat
 			                 + "&lon="    + lon
 			                 + "&time="   +  document.getElementById("Time").value
+			                 + "&plot=skewt"
 			;
 			addInfo(E.latLng, "<pre>See PopUp Window</pre>");
 			// alert("diff = " + diff + "\ntail = " + tail);
 			paramWindow = window.open(blipSpotUrl + "?" + tail, 'SkewT', 'height=850,width=850');
 			return;
 	case "Value":
-			blipSpotUrl = Server + "cgi-bin/get_rasp_blipspot.cgi";
+			// blipSpotUrl = Server + "cgi-bin/get_rasp_blipspot.cgi";
+			blipSpotUrl = Server + "perl/get_rasp_blipspot.cgi";
 			str = archiveMode ? "UK%2b0" : getBasedir().replace("\+", "%2b"); // %2b == '+'
 
 			tail = "region=" + str
@@ -1374,7 +1445,8 @@ function newclick(E)
 
 			break;
 	case "Day":
-			blipSpotUrl = Server + "cgi-bin/get_rasp_blipspot.cgi";
+			// blipSpotUrl = Server + "cgi-bin/get_rasp_blipspot.cgi";
+			blipSpotUrl = Server + "perl/get_rasp_blipspot.cgi";
 			str = archiveMode ? "UK%2b0" : getBasedir().replace("\+", "%2b"); // %2b == '+'
 
 			tail = "region=" + str
@@ -1420,19 +1492,9 @@ function getRegion()
 
 function addInfo(location, txt)
 {
-	var infoOpts;
-	var longline = false;
-
 	// if((imgWid < 480) || (imgHeight < 480))	// Remove other infoWindows on small screens
 	//	deleteInfo();
 	
-	var el = document.getElementById("popup").info;
-
-	for(i = 0; i < el.length; i++){
-		if(el[i].checked)
-			infoPopup = el[i].value;
-	}
-
 	var nlines = 2;	// Always need at least two lines to  prevent scroll bars
 	var ind = 0;
 	var longline = false;
@@ -1452,24 +1514,14 @@ function addInfo(location, txt)
 		nlines++;
 	txt1 = '<div style="height: ' + nlines + 'em;" >' + txt + '</div>';
 
-	infoOpts = {
-	           position: location,
-	           map:      map,
-		   maxHeight: 50,
-	           content:  txt1
-	};
-	var infowindow = new google.maps.InfoWindow( infoOpts );
+	var infowindow = new google.maps.InfoWindow( {
+	                          position: location,
+	                          map:      map,
+	                          maxHeight: 50,
+	                          content:  txt1
+	                     });
 	infowindow.open(map);
 	infoArray.push(infowindow);
-
-	// This is a bit kludgy - Adjust *every* infowindow each time - but it seems to work!
-	google.maps.event.addDomListenerOnce(infowindow, 'domready', function(event) {
-			var arr = document.getElementsByTagName("pre");
-			for(var e = 0; e < arr.length; e++){
-				arr[e].parentNode.parentNode.style.overflow = 'visible';
-			}
-		}, true
-	);
 }
 
 function deleteInfo()
@@ -1485,25 +1537,6 @@ function deleteInfo()
 		}
 	}
 }
-
-
-/*
-function writePopup(text)
-{
-	var txt;
-
-	if(text.lastIndexOf('\n') - text.indexOf('\n') > 1){
-		// txt = document.getElementById("Param").value + "<br>" + text.replace(/\n/, (document.getElementById("Param").value === "wstar_bsratio" ? "<br>BS: ": "<br>Dirn: "));
-		txt = text.replace(/\n/, (document.getElementById("Param").value === "wstar_bsratio" ? "<br>BS: ": "<br>Dirn: ")) ;
-	}
-	else {
-		// txt = document.getElementById("Param").value + "<br>" + text;
-		txt = text +"<br>";
-	}
-	// alert('Text = "' + text + '"\nPosn = ' + Event.latLng)
-	addInfo(Event.latLng, txt, 80, 120);
-}
-*/
 
 
 function switchParamList(E)
@@ -1546,14 +1579,6 @@ function changeParamset(newParams)
 	}
 }
 
-function LongClick(map, length) {
-    this.length_ = length;
-    var me = this;
-    me.map_ = map;
-    google.maps.event.addListener(map, 'mousedown', function(e) { me.onMouseDown_(e) });
-    google.maps.event.addListener(map, 'mouseup',   function(e) { me.onMouseUp_(e)   });
-}
-
 LongClick.prototype.onMouseUp_ = function(e) {
     var now = new Date;
     if (now - this.down_ > this.length_) {
@@ -1566,7 +1591,14 @@ LongClick.prototype.onMouseDown_ = function() {
     this.down_ = new Date;
 }
 
-/**** Subclass Google Maps OverlayView() to add Opacity ****/
+function LongClick(map, length) {
+    this.length_ = length;
+    var me = this;
+    me.map_ = map;
+    google.maps.event.addListener(map, 'mousedown', function(e) { me.onMouseDown_(e) });
+    google.maps.event.addListener(map, 'mouseup',   function(e) { me.onMouseUp_(e)   });
+}
+
 
 function cancelEvent(e)
 {
@@ -1658,76 +1690,116 @@ function myMouseMove_(e) {
 
 var p = null;
 
+
+var t_prev = new Date().getTime();
+function func(e)
+{
+	var t_curr = new Date().getTime();
+	if( typeof t_prev != 'undefined'){
+		t_diff = t_curr - t_prev;
+		t_prev = t_curr;
+		return( t_diff > 200 );
+	}
+	return(false);
+}
+	
+var N = window.navigator;
+
 function myMouseWheel_(e)
 {
 	e = e || window.event;
+	// cancelEvent(e);
+
+	// alert("e.wheelDelta = " + e.wheelDelta + " e.deltaY = " + e.deltaY); 
+
+	/*
+	var browser = "Browser info:\n";
+	for( var P in N ){
+		browser += P + ": " + N[P] + "\n";
+	}
+	alert(browser);
+	*/
+
 	if (e.wheelDelta) { // IE/Opera/Chrome. 
 		delta = e.wheelDelta/120;
 		if (window.opera)
 			delta = -delta; // In Opera 9, delta differs in sign as compared to IE
 	}
-	else if (e.detail) { // Mozilla & friends
-		delta = -e.detail / 3.0; // Sgn(delta) opposite
+	else if (e.deltaY) { // Mozilla & friends
+		delta = -e.deltaY / 3.0; // Sgn(delta) opposite
 	}
+
 	if(e.shiftKey){	// Adjust Opacity
-		opacity += 3 * delta; // "opacity" ensures all overlays have this opacity
+		opacity += 3 * delta;
 		opacity = (opacity > 100) ? 100 : opacity;
 		opacity = (opacity < 0)   ?   0 : opacity;
 		overlay.setOpacity();
 		// Set slider too
 		var newsliderValue = OPACITY_MAX_PIXELS * (opacity/ 100);
 		opacityCtrlKnob.setValueX(newsliderValue);
+		e.returnValue = false;
+		return;
 	}
-	else{ // Adjust Zoom
-		cancelEvent(e);
-		p = getMousePoint(e);	// mouse posn on map in pixel coords - top left is (0,0)
-		if (!p) {
+
+	// Adjust Zoom
+//	else if(N.appName == "Netscape" && N.platform == "MacIntel" ){
+//		if( !e.ctrlKey ){
+//			e.cancelEvent(e);
+//			e.returnValue = false;
+//alert("MacIntel - NOT Doing Zoom!");
+//			return;
+//		}
+		if(!func()){
+			e.cancelEvent(e);
+			e.returnValue = false;
+// alert("MacIntel - 2 NOT Doing Zoom!");
 			return;
 		}
-		var div = map.getDiv();
-		var cX = div.offsetWidth  / 2;	// centre of map (pixel coords)
-		var cY = div.offsetHeight / 2;
-		var z = map.getZoom();
-
-		if(delta > 0) {
-			if(z < 12){
-				z++;
-				map.panBy((p.x-cX)/2, (p.y-cY)/2);
-			}
-		}
-		else {
-			if(z > 6){	// Do nothing if zoom == 6 (minZoom)
-				z--;
-				map.panBy(cX-p.x, cY-p.y);
-			}
-		}
-		map.setZoom(z);
-		zoom = z;
+//	}
+	p = getMousePoint(e);	// mouse posn on map in pixel coords - top left is (0,0)
+	if (!p) {
+		return;
 	}
+	var div = map.getDiv();
+	var cX = div.offsetWidth  / 2;	// centre of map (pixel coords)
+	var cY = div.offsetHeight / 2;
+	var z = map.getZoom();
+
+	if(delta > 0) {
+		if(z < 12){
+			z++;
+			map.panBy((p.x-cX)/2, (p.y-cY)/2);
+		}
+	}
+	else {
+		if(z > 6){	// Do nothing if zoom == 6 (minZoom)
+			z--;
+			map.panBy(cX-p.x, cY-p.y);
+		}
+	}
+	map.setZoom(z);
+	zoom = z;
+	e.returnValue = false;
 }
+
+
+/**************** Start OVERLAY Stuff ******************/
 
 RASPoverlay.prototype = new google.maps.OverlayView();
 
-function RASPoverlay(bounds, image, map)
+function RASPoverlay(bounds, image, map, vis)
 {
 	this.bounds_        = bounds;
 	this.url_           = image;
 	this.map_           = map;
-	this.id             = image;
+	this.Id             = image;
 	this.div            = null;
-
-	// Is this IE, if so we need to use AlphaImageLoader
-	var agent = navigator.userAgent.toLowerCase();
-	if ((agent.indexOf("msie") > -1) && (agent.indexOf("opera") < 1)) {
-		this.ie = true ;
-	}
-	else {
-	 this.ie = false ;
-	}
+	this.vis_	    = vis;
+	this.setMap(map);
 }
 
-var mouseWheelListener_   = null; 
-var mouseWheelListener2_  = null; 
+
+var L = null;	// Flags wheelListener Loaded
 
 RASPoverlay.prototype.onAdd = function()
 {
@@ -1735,12 +1807,13 @@ RASPoverlay.prototype.onAdd = function()
 	div.style.border      = "none";
 	div.style.borderwidth = "0px";
 	div.style.position    = "absolute" ;
-	div.setAttribute('id',this.id) ;
+	div.setAttribute('Id',this.Id) ;
 
 	var img = document.createElement("img");
-	img.src          = this.url_;
-	img.style.width  = "100%";
-	img.style.height = "100%";
+	img.src            = this.url_;
+	img.style.width    = "100%";
+	img.style.height   = "100%";
+	img.style.position = "absolute";
 	div.appendChild(img);
 
 	this.div_ = div;
@@ -1748,11 +1821,17 @@ RASPoverlay.prototype.onAdd = function()
 	var panes = this.getPanes();
  	panes.overlayLayer.appendChild(div);
 
-	if( !mouseWheelListener_  )
-		mouseWheelListener_  = google.maps.event.addDomListener(this.map_.getDiv(), 'mousewheel',     function (e) { myMouseWheel_(e); }, true);
-	if( !mouseWheelListener2_ )
-		mouseWheelListener2_ = google.maps.event.addDomListener(this.map_.getDiv(), 'DOMMouseScroll', function (e) { myMouseWheel_(e); }, true);
-	this.mouseMoveListener_   = google.maps.event.addDomListener(this.map_.getDiv(), 'mousemove',      function (e) { myMouseMove_(e); },  true);
+	google.maps.event.addDomListener(this.map_.getDiv(), 'mousemove',      function (e) { myMouseMove_(e); },  true);
+
+	if (!L){ L = google.maps.event.addDomListener(this.map_.getDiv(), 'wheel',     function (e) { myMouseWheel_(e); }, true); }
+
+	var o = opacity / 100;
+	if      (typeof(div.style.opacity)      == 'string') { div.style.opacity      = o ; }
+	else if (typeof(div.style.KHTMLOpacity) == 'string') { div.style.KHTMLOpacity = o ; }
+	else if (typeof(div.style.MozOpacity)   == 'string') { div.style.MozOpacity   = o ; }
+	else if (typeof(div.style.filter)       == 'string') { div.style.filter = 'alpha(opacity=' + opacity + ')'; } //<IE9
+
+	div.style.visibility = this.vis_;
 }
 
 RASPoverlay.prototype.draw = function()
@@ -1766,20 +1845,18 @@ RASPoverlay.prototype.draw = function()
 	var ne = overlayProjection.fromLatLngToDivPixel(this.bounds_.getNorthEast());
 
 	// Position our DIV using our bounds
-	if(this.div_ == null)
-		return;
-	this.div_.style.left   = Math.min(sw.x,  ne.x) + "px";
-	this.div_.style.top    = Math.min(ne.y,  sw.y) + "px";
-	this.div_.style.width  = Math.abs(sw.x - ne.x) + "px";
-	this.div_.style.height = Math.abs(ne.y - sw.y) + "px";
-
-	this.hide();	// show() is run later
+	var div = this.div_;
+	div.style.left   = sw.x + "px";
+	div.style.top    = ne.y + "px";
+	div.style.width  = ne.x - sw.x + "px";
+	div.style.height = sw.y - ne.y + "px";
 }
 
 // Remove the main DIV from the map pane
 RASPoverlay.prototype.onRemove = function()
 {
 	this.div_.parentNode.removeChild(this.div_);
+	this.div_ = null;
 }
 
 /* 
@@ -1804,35 +1881,25 @@ RASPoverlay.prototype.show = function()
 	}
 }
 
-RASPoverlay.prototype.setOpacity=function()
+RASPoverlay.prototype.setOpacity = function()
 {
 	var c = opacity/100 ;
-	var d = document.getElementById( this.id ) ;
+	var d = document.getElementById( this.Id ) ;
 
 	if (d) {
-		this.show();
-		if (typeof(d.style.filter)       == 'string') { d.style.filter = 'alpha(opacity=' + opacity + ')'; } //IE
-		if (typeof(d.style.KHTMLOpacity) == 'string') { d.style.KHTMLOpacity = c ; }
-		if (typeof(d.style.MozOpacity)   == 'string') { d.style.MozOpacity = c ; }
-		if (typeof(d.style.opacity)      == 'string') { d.style.opacity = c ; }
+		if      (typeof(d.style.opacity)      == 'string') { d.style.opacity      = c ; }
+		else if (typeof(d.style.KHTMLOpacity) == 'string') { d.style.KHTMLOpacity = c ; }
+		else if (typeof(d.style.MozOpacity)   == 'string') { d.style.MozOpacity   = c ; }
+		else if (typeof(d.style.filter)       == 'string') { d.style.filter = 'alpha(opacity='+opacity+')'; } //<IE9
+
 		doUrl();
 	}
 }
 
+/**************** End OVERLAY Stuff ******************/
 
-RASPoverlay.prototype.getOpacity=function()
-{
-	var d = document.getElementById(this.id);
-	if(d){
-		if (typeof(d.style.filter)       == 'string') { d.style.filter = 'alpha(opacity=' + opacity + ');'; } //IE
-		if (typeof(d.style.KHTMLOpacity) == 'string') { return(100 * d.style.KHTMLOpacity); }
-		if (typeof(d.style.MozOpacity)   == 'string') { return(100 * d.style.MozOpacity);   }
-		if (typeof(d.style.opacity)      == 'string') { return(100 * d.style.opacity);      }
-	}
-	return(undefined);
-}
 
-// add indexOf function - For the dreaded m$ Widnows Exploder
+/* indexOf function - For Widnows Exploder < IE9 */
 if (!Array.prototype.indexOf){
 	Array.prototype.indexOf = function(val, fromIndex) {
 		if (typeof(fromIndex) != 'number')
@@ -1843,6 +1910,10 @@ if (!Array.prototype.indexOf){
 			return -1;
 	}
 }
+/* End indexOf */
+
+
+/****************** Start OPACITY CONTROL Stuff **********************/
 
 function createOpacityControl(map)
 {
@@ -1879,7 +1950,8 @@ function createOpacityControl(map)
 	// Set initial value
 	var initialValue = OPACITY_MAX_PIXELS * (opacity/ 100);
 	opacityCtrlKnob.setValueX(initialValue);
-	setKnobOpacity(opacityCtrlKnob.valueX());
+	// setKnobOpacity(opacityCtrlKnob.valueX());
+	opacity_control = "Y";
 }
 
 function setKnobOpacity(pixelX) {
@@ -1888,7 +1960,7 @@ function setKnobOpacity(pixelX) {
 	if (opacity < 0)   opacity = 0;
 	if (opacity > 100) opacity = 100;
 	for(var o = 0; o < Overlays.length; o++){
-		if(Overlays[o] && Overlays[o].isVisible()){
+		if(Overlays[o] ){
 			Overlays[o].setOpacity();
 		}
 	}
@@ -1905,50 +1977,4 @@ function findPosLeft(obj) {
 	return undefined;
 }
 
-function getTask()
-{
-	window.open("task.html", 'Specify_Task', "width=600,height=300");
-}
-
-// Default Values for getGlider()
-var glider  = "DiscusA";
-var ballast = "1";
-var tsink   = "2.00kt";
-var tmult   = "1.0";
-
-function selGlider()
-{
-	return popup("glider.html", 'Select_Glider', 480, 300);
-}
-
-
-function TrackAvg()
-{
-	var str;
-	
-	str = Server + "/cgi-bin/get_rasptrackavg.cgi?region=" + getRegion() + "&grid=d2&day=" ;
-
-	if(archiveMode){
-		str = str + document.getElementById("archiveYear").value + "-"
-                          + document.getElementById("archiveMonth").value + "-"
-                          + document.getElementById("archiveDay").value;
-	}
-	else{
-		str = str + "0";
-	}
-
-/*
-	str = str + "&time=" + document.getElementById("Time").value + "%2b&polar=" + glider + "&wgt=" + ballast + "&tsink=" + tsink + "&tmult=" + tmult + "&latlons=";
-	for(i  = 0; i < taskList.length; i++){
-		str = str + taskList[i].toUrlValue() + ",";
-	}
- */
-	str = str + "&time=" + document.getElementById("Time").value + "%2b&polar=" + glider + "&wgt=" + ballast + "&tsink=" + tsink + "&tmult=" + tmult + "&turnpts=";
-	for(i  = 0; i < TParray.length; i++){
-		str = str + TParray[i] + ",";
-	}
-	str = str.replace(/,$/ , '');	// Zap last ','
-
-	// alert(str);
-	window.open(str, "Track_Average", "width=1024,height=700,resizable=yes,scrollbars=yes");
-}
+/****************** End OPACITY CONTROL Stuff **********************/
